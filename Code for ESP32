@@ -1,0 +1,162 @@
+#define BLYNK_TEMPLATE_ID "TMPL62rI9RA98"
+#define BLYNK_TEMPLATE_NAME "ESP32 Load Manager"
+#define BLYNK_AUTH_TOKEN "_OLvWf_e3fLhp4OcDdVfvmkWFt8qhSSg"
+
+#include <WiFi.h>
+#include <BlynkSimpleEsp32.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h>
+
+// === WiFi Credentials ===
+char ssid[] = "Your Wifi";
+char pass[] = "Your Wifi Passward";
+
+// === Pin Definitions ===
+const int SHUNT1_PIN = 34;
+const int SHUNT2_PIN = 35;
+const int SHUNT3_PIN = 36;
+
+const int LOAD1_PIN = 14;   // Load 1
+const int LOAD2_PIN = 12;   // Load 2
+const int LOAD3_PIN = 13;   // Load 3
+
+const int RELAY_PIN = 33;   // Solar/Battery relay
+const int BATTERY_VOLTAGE_PIN = 32; // Not used now
+
+// === Constants ===
+const float R1 = 470.0;
+const float R2 = 330.0;
+const float R3 = 220.0;
+
+// OLED initialization
+Adafruit_SH1106G display(128, 64, &Wire, -1); 
+
+// === Blynk Button Handlers (with instant LED sync) ===
+BLYNK_WRITE(V10) {
+  int state = param.asInt();
+  digitalWrite(LOAD1_PIN, state);
+  Blynk.virtualWrite(V6, state);  // Update Load 1 LED immediately
+}
+BLYNK_WRITE(V11) {
+  int state = param.asInt();
+  digitalWrite(LOAD2_PIN, state);
+  Blynk.virtualWrite(V7, state);  // Update Load 2 LED immediately
+}
+BLYNK_WRITE(V12) {
+  int state = param.asInt();
+  digitalWrite(LOAD3_PIN, state);
+  Blynk.virtualWrite(V8, state);  // Update Load 3 LED immediately
+}
+
+// === Helper Functions ===
+float readCurrent(int pin, float shuntResistor) {
+  float raw = analogRead(pin);
+  float voltage = (raw / 4095.0) * 5.0;
+  return voltage / shuntResistor;
+}
+
+  float read_voltage(int analogPin) {
+  int raw = analogRead(analogPin);
+  float voltage = (raw / 4095.0) * 5.0;
+  return voltage;
+}
+
+float power_value(float cur, float res) {
+  return cur * cur * res * 1000.00; // mW
+}
+
+void setup() {
+  Serial.begin(115200);
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+
+  if(!display.begin(0x3C)) { 
+    Serial.println(F("SH1106 allocation failed"));
+    for(;;);
+  }
+
+  display.clearDisplay();
+  display.display();
+
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(5, 5);
+  display.println(F("Smart BackUP Power \nManagement and \nMonitoring \nSystem"));
+  display.display();
+
+  pinMode(LOAD1_PIN, OUTPUT);
+  pinMode(LOAD2_PIN, OUTPUT);
+  pinMode(LOAD3_PIN, OUTPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+
+  // Start all loads OFF
+  digitalWrite(LOAD1_PIN, LOW);
+  digitalWrite(LOAD2_PIN, LOW);
+  digitalWrite(LOAD3_PIN, LOW);
+  digitalWrite(RELAY_PIN, LOW);
+}
+
+void loop() {
+  Blynk.run();
+  
+  //Read Voltage
+  float v1 = read_voltage(SHUNT1_PIN);
+  float v2 = read_voltage(SHUNT2_PIN);
+  float v3 = read_voltage(SHUNT3_PIN);
+
+  // Read currents
+  float current1 = readCurrent(SHUNT1_PIN, R1);
+  float current2 = readCurrent(SHUNT2_PIN, R2);
+  float current3 = readCurrent(SHUNT3_PIN, R3);
+
+  // Calculate power
+  float pow1 = power_value(current1, R1);
+  float pow2 = power_value(current2, R2);
+  float pow3 = power_value(current3, R3);
+
+  // === OLED Display ===
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE);
+
+  display.setCursor(0, 0);
+  display.printf("Power-1: %.3f mW", pow1);
+
+  display.setCursor(0, 10);
+  display.printf("Power-2: %.3f mW", pow2);
+
+  display.setCursor(0, 20);
+  display.printf("Power-3: %.3f mW", pow3);
+
+  display.setCursor(0,30);
+  display.printf("Voltage 1 : %0.3f\n", v1);
+  display.setCursor(0,40);
+  display.printf("Voltage 2 : %0.3f\n", v2);
+  display.setCursor(0,50);
+  display.printf("Voltage 3 : %0.3f\n", v3);
+
+
+  display.display();
+  
+  // === Serial Debug ===
+  Serial.println("=== Load Status ===");
+  Serial.printf("Voltage 1 : %.4fV | Voltage 2 : %.4fV | Voltage 3 : %.4fV\n", v1, v2, v3);
+  Serial.printf("Current1: %.4f A | Current2: %.4f A | Current3: %.4f A\n", current1, current2, current3);
+  Serial.printf("Power1: %.3f mW | Power2: %.3f mW | Power3: %.3f mW\n", pow1, pow2, pow3);
+  Serial.print(" - Load 1: "); Serial.println(digitalRead(LOAD1_PIN) ? "ON" : "OFF");
+  Serial.print(" - Load 2: "); Serial.println(digitalRead(LOAD2_PIN) ? "ON" : "OFF");
+  Serial.print(" - Load 3: "); Serial.println(digitalRead(LOAD3_PIN) ? "ON" : "OFF");
+  Serial.println("----------------------------------");
+
+  // === Send data to Blynk ===
+  Blynk.virtualWrite(V3, current1);
+  Blynk.virtualWrite(V4, current2);
+  Blynk.virtualWrite(V5, current3);
+
+  // Keep LEDs synced
+  Blynk.virtualWrite(V6, digitalRead(LOAD1_PIN));
+  Blynk.virtualWrite(V7, digitalRead(LOAD2_PIN));
+  Blynk.virtualWrite(V8, digitalRead(LOAD3_PIN));
+
+  delay(2000);
+}
